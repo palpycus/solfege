@@ -360,10 +360,19 @@ class WebSpeechRecognizer {
 const onset = { ctx: null, src: null, analyser: null, buf: null, speaking: false, t: 0 };
 async function startOnsetMeter() {
   if (onset.ctx) { await onset.ctx.resume(); return; }
-  const stream = await navigator.mediaDevices.getUserMedia({
+  // iOS Safari: both the AudioContext and getUserMedia must be kicked off
+  // synchronously inside the user's tap — any await beforehand (e.g. the
+  // model download) ends the gesture and the mic prompt never appears.
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+    throw new Error('getUserMedia unavailable (needs HTTPS and a modern browser)');
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC();
+  const streamP = navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
   });
-  onset.ctx = new AudioContext();
+  const stream = await streamP;
+  await ctx.resume();
+  onset.ctx = ctx;
   onset.src = onset.ctx.createMediaStreamSource(stream);
   onset.analyser = onset.ctx.createAnalyser();
   onset.analyser.fftSize = 512;
@@ -820,6 +829,19 @@ startBtn.addEventListener('click', async () => {
     return;
   }
   startBtn.disabled = true;
+  // 1. Grab the mic FIRST, while we are still inside the tap gesture.
+  try {
+    engineEl.textContent = 'engine: requesting microphone…';
+    await startOnsetMeter();
+  } catch (e) {
+    console.warn('Microphone unavailable:', e);
+    showBanner('Microphone unavailable: ' + (e && (e.name + ' — ' + e.message) || e) +
+      '. Check Settings › Safari › Microphone (and the site\'s aA menu › Website Settings), then reload.');
+    engineEl.textContent = 'engine: no microphone';
+    startBtn.disabled = false;
+    return;
+  }
+  // 2. Only now load the model — this can take a while on first visit.
   try {
     if (typeof Vosk === 'undefined') throw new Error('vosk-browser script not loaded');
     if (!voskModel) {
@@ -837,7 +859,9 @@ startBtn.addEventListener('click', async () => {
       recognizer.start();
       engineEl.textContent = 'engine: Web Speech fallback — open vocabulary, expect mishearings';
     } catch (e2) {
-      showBanner('No speech engine available. Serve the folder over http://localhost (python3 -m http.server) and use Chrome, Edge, or Safari.');
+      showBanner('No speech engine available. Vosk: ' + (e && e.message || e) +
+        ' · Web Speech: ' + (e2 && e2.message || e2) +
+        '. Use HTTPS (or http://localhost) in Chrome, Edge, or Safari.');
       startBtn.disabled = false;
       return;
     }
