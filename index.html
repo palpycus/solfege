@@ -818,6 +818,30 @@ function showBanner(text) {
 
 let voskModel = null;
 const engineEl = document.getElementById('engineStatus');
+
+/* vosk-browser runs in a blob: worker and resolves a RELATIVE model path
+   against the site root, so on a sub-path host (GitHub Pages) "model/x" → 404.
+   Always hand it an absolute URL. Its createModel() also never rejects when
+   the worker reports an error — it just hangs — so wire up the error event
+   and a timeout ourselves and keep the status line ticking. */
+const MODEL_URL = new URL('model/vosk-model-small-fr-0.22.tar.gz', location.href).href;
+function loadVoskModel(url, timeoutMs = 4 * 60 * 1000) {
+  return new Promise((resolve, reject) => {
+    const t0 = performance.now();
+    const tick = setInterval(() => {
+      engineEl.textContent = 'engine: loading French model (40 MB, first visit only)… ' +
+        Math.round((performance.now() - t0) / 1000) + 's';
+    }, 1000);
+    let done = false;
+    const finish = (fn, v) => { if (done) return; done = true; clearInterval(tick); clearTimeout(timer); fn(v); };
+    const timer = setTimeout(() => finish(reject, new Error('model load timed out after ' + timeoutMs / 1000 + 's — slow network or the browser refused storage')), timeoutMs);
+    let model;
+    try { model = new Vosk.Model(url, 0); }
+    catch (e) { finish(reject, e); return; }
+    model.on('load',  (m) => m.result ? finish(resolve, model) : finish(reject, new Error('model failed to load')));
+    model.on('error', (m) => finish(reject, new Error(m && m.error || 'worker error')));
+  });
+}
 const onHeard = (t) => { document.getElementById('heard').textContent = 'heard: ' + (t || '—'); };
 
 startBtn.addEventListener('click', async () => {
@@ -845,8 +869,8 @@ startBtn.addEventListener('click', async () => {
   try {
     if (typeof Vosk === 'undefined') throw new Error('vosk-browser script not loaded');
     if (!voskModel) {
-      engineEl.textContent = 'engine: loading French model (46 MB — first load only, ~10s)…';
-      voskModel = await Vosk.createModel('model/vosk-model-small-fr-0.22.tar.gz');
+      engineEl.textContent = 'engine: loading French model (40 MB, first visit only)…';
+      voskModel = await loadVoskModel(MODEL_URL);
     }
     recognizer = new VoskRecognizer(voskModel, handleWord, onHeard);
     await recognizer.start();
