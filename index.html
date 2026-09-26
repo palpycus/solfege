@@ -424,10 +424,13 @@ const CHORD_SIZES = [[1, 'Non'], [2, '2 notes'], [3, '3 notes'], [4, '4 notes']]
 /* Presets: a named bundle of exercise settings. Preset 1 is the default. */
 const PRESETS = [
   { id: 'preset1', label: 'Preset 1',
-    hint: 'Clé de sol · sol3→si5 · 45 notes · sans accords · octave',
-    settings: { clef: 'treble', low: 25, high: 41, count: 45, leap: 7, chord: 1 } },   // sol3=25, si5=41
+    hint: 'Clé de sol · sol3→si5 · 45 notes · sans accords · octave · noms masqués',
+    settings: { clef: 'treble', low: 25, high: 41, count: 45, leap: 7, chord: 1, showLabels: false } },   // sol3=25, si5=41
+  { id: 'preset2', label: 'Preset 2',
+    hint: 'Clé de fa · do2→fa4 (toute la tessiture) · 45 notes · sans accords · octave · noms masqués',
+    settings: { clef: 'bass', low: 14, high: 31, count: 45, leap: 7, chord: 1, showLabels: false } },     // do2=14, fa4=31
 ];
-const settings = { ...PRESETS[0].settings, showLabels: true };
+const settings = { ...PRESETS[0].settings };
 const lowSel = document.getElementById('lowSel'), highSel = document.getElementById('highSel');
 
 function degName(d) { return DISPLAY[SYLLABLES[d % 7]] + Math.floor(d / 7); }
@@ -520,7 +523,7 @@ function buildSettingsUI() {
   makeChips(document.getElementById('labelChips'),
     [{ value: true, html: 'Afficher' }, { value: false, html: 'Masquer' }],
     settings.showLabels, v => { settings.showLabels = v; },
-    drawStaff);   // display-only: redraw without regenerating the exercise
+    () => { drawStaff(); updatePresetChips(); });   // display-only: redraw without regenerating the exercise
 
   makeChips(document.getElementById('chordChips'),
     CHORD_SIZES.map(([v, label]) => ({ value: v, html: label })),
