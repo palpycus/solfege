@@ -935,6 +935,7 @@ function celebrate() {
 }
 
 function finish() {
+  stopListening();        // exercise complete: release the mic and flip the button back to Start
   celebrate();
   const total = (performance.now() - startTime) / 1000;
   const avg = latencies.length
@@ -1021,14 +1022,15 @@ function loadVoskModel(url, timeoutMs = 4 * 60 * 1000) {
 }
 const onHeard = (t) => { document.getElementById('heard').textContent = 'heard: ' + (t || '—'); };
 
+function stopListening() {
+  running = false;
+  if (recognizer) recognizer.stop();
+  startBtn.textContent = '▶ Start listening';
+  drawStaff();
+}
+
 startBtn.addEventListener('click', async () => {
-  if (running) {
-    running = false;
-    recognizer.stop();
-    startBtn.textContent = '▶ Start listening';
-    drawStaff();
-    return;
-  }
+  if (running) { stopListening(); return; }
   startBtn.disabled = true;
   // 1. Grab the mic FIRST, while we are still inside the tap gesture.
   try {
