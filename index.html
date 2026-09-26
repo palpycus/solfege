@@ -423,11 +423,11 @@ const CHORD_SIZES = [[1, 'Non'], [2, '2 notes'], [3, '3 notes'], [4, '4 notes']]
 
 /* Presets: a named bundle of exercise settings. Preset 1 is the default. */
 const PRESETS = [
-  { id: 'preset1', label: 'Preset 1',
-    hint: 'Clé de sol · sol3→si5 · 45 notes · sans accords · octave · noms masqués',
+  { id: 'preset1', label: 'Exercise 1: Clé de sol',
+    hint: 'sol3→si5 · 45 notes · sans accords · octave · noms masqués',
     settings: { clef: 'treble', low: 25, high: 41, count: 45, leap: 7, chord: 1, showLabels: false } },   // sol3=25, si5=41
-  { id: 'preset2', label: 'Preset 2',
-    hint: 'Clé de fa · do2→fa4 (toute la tessiture) · 45 notes · sans accords · octave · noms masqués',
+  { id: 'preset2', label: 'Exercise 2: Clé de fa',
+    hint: 'do2→fa4 (toute la tessiture) · 45 notes · sans accords · octave · noms masqués',
     settings: { clef: 'bass', low: 14, high: 31, count: 45, leap: 7, chord: 1, showLabels: false } },     // do2=14, fa4=31
 ];
 const settings = { ...PRESETS[0].settings };
@@ -834,14 +834,36 @@ function handleWord(word, tRecognized) {
   return false;
 }
 
-/* ---------------- Celebration: confetti + flying unicorns ---------------- */
+/* ---------------- Celebration: a randomised show — confetti styles, fireworks, animal acts ----------------
+   Every finish composes a different show: a colour palette, 2–4 confetti styles fired from
+   random emitters, an optional fireworks display, and 1–3 animal acts (fliers, swimmers, a
+   parade, a stampede, bouncers, balloon riders). `force` lets tests pin the composition. */
 const fx = { canvas: document.getElementById('fx'), raf: 0, active: false };
 function stopCelebration() {
   fx.active = false;
   cancelAnimationFrame(fx.raf);
   fx.canvas.style.display = 'none';
 }
-function celebrate() {
+
+const FX_PALETTES = {
+  candy:   ['#ff5ea8', '#ffb3de', '#7c6cbf', '#4fb3e8', '#f7c948', '#a1e3a1'],
+  neon:    ['#ff2079', '#04d9ff', '#39ff14', '#ffe700', '#b026ff', '#ff6f00'],
+  rainbow: ['#e40303', '#ff8c00', '#ffed00', '#008026', '#004dff', '#750787'],
+  gold:    ['#ffd700', '#f5c542', '#ffefa0', '#e6b422', '#fff4c2', '#c9a227', '#d9d9d9'],
+  ocean:   ['#0077b6', '#00b4d8', '#90e0ef', '#caf0f8', '#48cae4', '#023e8a'],
+  sunset:  ['#ff6b6b', '#ffa06b', '#ffd36b', '#ff8fab', '#c77dff', '#ffb4a2'],
+  forest:  ['#2d6a4f', '#40916c', '#74c69d', '#b7e4c7', '#f7c948', '#d8f3dc'],
+};
+const FX_ANIMALS = {
+  fliers:   ['🦄', '🐉', '🦋', '🦜', '🦅', '🐦', '🦇', '🐝', '🦢', '🦩', '🕊️', '🐲', '🦉', '🐧'],
+  swimmers: ['🐬', '🐳', '🐠', '🐙', '🦈', '🐡', '🦑', '🐢', '🐟', '🦭', '🐋', '🦞'],
+  walkers:  ['🐘', '🦒', '🦁', '🐼', '🐧', '🦊', '🐸', '🐱', '🐶', '🦖', '🐨', '🐮', '🐷', '🐔', '🦔', '🐇', '🐐', '🦓', '🐫', '🦘'],
+  riders:   ['🐙', '🐌', '🐢', '🦥', '🐨', '🐼', '🐻', '🐹', '🐭', '🐰', '🐱'],
+};
+const FX_EMOJI_CONFETTI = ['🎵', '🎶', '♪', '♫', '🎉', '🎊', '⭐', '🌈', '🍀', '🍬', '💎', '🌸', '🎈', '🏆'];
+const FX_CHEERS = ['Bravo !', 'Magnifique !', 'Superbe !', 'Champion !', 'Quelle oreille !', 'Impeccable !', 'Formidable !', 'Génial !', 'Chapeau !', 'Bien joué !'];
+
+function celebrate(accuracy = 100, force = {}) {
   stopCelebration();
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const cv = fx.canvas, ctx = cv.getContext('2d');
@@ -851,83 +873,221 @@ function celebrate() {
   cv.style.display = 'block';
   const W = () => innerWidth, H = () => innerHeight;
   const R = (a, b) => a + Math.random() * (b - a);
-  const COLORS = ['#7c6cbf', '#4caf7d', '#e0687c', '#f7c948', '#4fb3e8', '#ff8c42', '#ff5ea8', '#a1e3a1'];
-  const DURATION = 7000;
-  let t0 = 0;   // clock starts on the first painted frame, so a stall at start-up (audio init, tab switch) can't eat the show
+  const RI = (a, b) => Math.floor(R(a, b + 1));
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+  const shuffle = arr => arr.slice().sort(() => Math.random() - 0.5);
+  const EMOJI_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+  const glyph = (g, size, x, y) => { ctx.font = `${size}px ${EMOJI_FONT}`; ctx.fillText(g, x, y); };
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 
-  // confetti: initial rain from the top + two cannon bursts from the bottom corners
+  // ---- compose tonight's show ----
+  const palette = force.palette ? FX_PALETTES[force.palette] : pick(Object.values(FX_PALETTES));
+  const color = () => pick(palette);
+  const lavish = accuracy >= 90;
+  const confettiStyles = force.confetti || shuffle(['classic', 'stars', 'hearts', 'streamers', 'emoji', 'glitter']).slice(0, RI(2, lavish ? 4 : 3));
+  const acts = force.acts || shuffle(['fly', 'swim', 'parade', 'stampede', 'bounce', 'balloon']).slice(0, RI(1, lavish ? 3 : 2));
+  const fireworks = force.fireworks != null ? force.fireworks : (lavish || Math.random() < 0.5);
+  const DURATION = 8500;
+  let t0 = 0;                                   // clock starts on the first painted frame
+  const schedule = [];                          // {at, fn}: events fired later in the show
+  const later = (at, fn) => schedule.push({ at, fn });
+
+  // ---- confetti ----
   const confetti = [];
-  const addPiece = (x, y, vx, vy) => confetti.push({
-    x, y, vx, vy, g: R(0.12, 0.22), drag: R(0.985, 0.995),
-    w: R(6, 12), h: R(8, 18), rot: R(0, Math.PI * 2), vr: R(-0.25, 0.25),
-    wob: R(0, Math.PI * 2), wobV: R(0.05, 0.14),
-    color: COLORS[Math.floor(Math.random() * COLORS.length)],
-    shape: Math.random() < 0.3 ? 'circle' : (Math.random() < 0.5 ? 'strip' : 'rect'),
-  });
-  for (let i = 0; i < 260; i++) addPiece(R(0, W()), R(-H(), -10), R(-1.2, 1.2), R(1, 4));
-  for (let i = 0; i < 120; i++) { const a = R(-1.35, -0.55); const sp = R(14, 24); addPiece(0, H(), Math.cos(a) * sp, Math.sin(a) * sp); }
-  for (let i = 0; i < 120; i++) { const a = R(-2.6, -1.8); const sp = R(14, 24); addPiece(W(), H(), Math.cos(a) * sp, Math.sin(a) * sp); }
-
-  // unicorns: 🦄 crosses the screen in waves, bobbing, leaving a sparkle trail
-  const unicorns = [], sparkles = [];
-  for (let i = 0; i < 16; i++) {
-    const dir = Math.random() < 0.5 ? 1 : -1, size = R(44, 84);
-    unicorns.push({
-      dir, size, x: dir > 0 ? -size - R(0, W() * 1.6) : W() + size + R(0, W() * 1.6),
-      y: R(H() * 0.08, H() * 0.8), vx: dir * R(3.2, 6.5),
-      bob: R(0, Math.PI * 2), bobV: R(0.04, 0.09), amp: R(10, 34),
-    });
+  function piece(style, x, y, vx, vy) {
+    const p = { style, x, y, vx, vy, g: R(0.1, 0.22), drag: R(0.985, 0.995), rot: R(0, 6.283), vr: R(-0.2, 0.2),
+                wob: R(0, 6.283), wobV: R(0.05, 0.14), size: R(7, 14), color: color(), trail: [] };
+    if (style === 'classic')   p.shape = pick(['rect', 'rect', 'strip', 'circle']);
+    if (style === 'emoji')     { p.glyph = pick(FX_EMOJI_CONFETTI); p.size = R(16, 30); p.g *= 0.6; }
+    if (style === 'glitter')   { p.size = R(1.5, 3.5); p.g = R(0.02, 0.05); p.drag = 0.99; p.tw = R(0, 6.283); }
+    if (style === 'streamers') { p.size = R(3, 5); p.g *= 0.7; }
+    if (style === 'hearts' || style === 'stars') p.size = R(6, 11);
+    confetti.push(p);
   }
-  const addSparkle = (x, y) => sparkles.push({ x, y, vx: R(-0.6, 0.6), vy: R(-0.8, 0.4), life: 1, glyph: Math.random() < 0.5 ? '✨' : (Math.random() < 0.5 ? '⭐' : '💫'), size: R(12, 22) });
+  const emit = (n, style, fn) => { for (let i = 0; i < n; i++) piece(style, ...fn()); };
+  const emitters = {
+    rain:      s => emit(180, s, () => [R(0, W()), R(-H(), -10), R(-1.2, 1.2), R(1, 4)]),
+    cannons:   s => { emit(110, s, () => { const a = R(-1.35, -0.55), sp = R(14, 24); return [0,   H(), Math.cos(a) * sp, Math.sin(a) * sp]; });
+                      emit(110, s, () => { const a = R(-2.6, -1.8),   sp = R(14, 24); return [W(), H(), Math.cos(a) * sp, Math.sin(a) * sp]; }); },
+    fountain:  s => emit(150, s, () => { const a = R(-2.0, -1.14), sp = R(16, 27); return [W() / 2 + R(-20, 20), H(), Math.cos(a) * sp, Math.sin(a) * sp]; }),
+    sideSweep: s => { const dir = Math.random() < 0.5 ? 1 : -1; emit(110, s, () => [dir > 0 ? -20 : W() + 20, R(0, H() * 0.7), dir * R(6, 12), R(-3, 1)]); },
+    burst:     s => { const cx = R(W() * 0.2, W() * 0.8), cy = R(H() * 0.15, H() * 0.5); emit(120, s, () => { const a = R(0, 6.283), sp = R(3, 12); return [cx, cy, Math.cos(a) * sp, Math.sin(a) * sp]; }); },
+  };
+  const emitterNames = Object.keys(emitters);
+  confettiStyles.forEach(s => emitters[pick(emitterNames)](s));
+  for (let k = 0; k < (lavish ? 4 : 2); k++) later(R(1200, 5500), () => emitters[pick(emitterNames)](pick(confettiStyles)));
 
+  const drawStar = r => { ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5 - Math.PI / 2, rr = i % 2 ? r * 0.45 : r; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } ctx.closePath(); ctx.fill(); };
+  const drawHeart = s => { ctx.beginPath(); ctx.moveTo(0, s * 0.45); ctx.bezierCurveTo(-s * 1.15, -s * 0.3, -s * 0.6, -s * 1.1, 0, -s * 0.45); ctx.bezierCurveTo(s * 0.6, -s * 1.1, s * 1.15, -s * 0.3, 0, s * 0.45); ctx.fill(); };
+  function stepConfetti(p) {
+    p.vy += p.g; p.vx *= p.drag; p.vy *= p.drag; p.wob += p.wobV;
+    p.x += p.vx + Math.sin(p.wob) * (p.style === 'glitter' ? 0.3 : 0.9); p.y += p.vy; p.rot += p.vr;
+    if (p.style === 'streamers') { p.trail.push([p.x, p.y]); if (p.trail.length > 14) p.trail.shift(); }
+    return p.y < H() + 40 && p.x > -60 && p.x < W() + 60;
+  }
+  function drawConfetti(p, fade) {
+    ctx.save();
+    if (p.style === 'streamers') {
+      ctx.strokeStyle = p.color; ctx.lineWidth = p.size; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath(); p.trail.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke();
+    } else if (p.style === 'glitter') {
+      ctx.globalAlpha = fade * (0.35 + 0.65 * Math.abs(Math.sin(p.tw += 0.25)));
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 6.283); ctx.fill();
+    } else if (p.style === 'emoji') {
+      ctx.translate(p.x, p.y); ctx.rotate(Math.sin(p.wob) * 0.5); glyph(p.glyph, p.size, 0, 0);
+    } else {
+      ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.scale(1, Math.abs(Math.cos(p.wob)) * 0.8 + 0.2);   // flutter
+      ctx.fillStyle = p.color;
+      if (p.style === 'stars') drawStar(p.size);
+      else if (p.style === 'hearts') drawHeart(p.size);
+      else if (p.shape === 'circle') { ctx.beginPath(); ctx.arc(0, 0, p.size / 2, 0, 6.283); ctx.fill(); }
+      else if (p.shape === 'strip') ctx.fillRect(-p.size / 4, -p.size, p.size / 2, p.size * 2);
+      else ctx.fillRect(-p.size / 2, -p.size * 0.35, p.size, p.size * 0.7);
+    }
+    ctx.restore();
+  }
+
+  // ---- fireworks ----
+  const sparks = [];
+  function firework(x, y) {
+    const col = color(), n = RI(60, 110), ring = Math.random() < 0.4, twoTone = Math.random() < 0.5 ? color() : col;
+    for (let i = 0; i < n; i++) {
+      const a = ring ? i / n * 6.283 : R(0, 6.283), sp = ring ? R(5.5, 6.5) : R(1.5, 7.5);
+      sparks.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1, decay: R(0.011, 0.02),
+                    color: i % 2 ? col : twoTone, trail: [] });
+    }
+  }
+  if (fireworks) for (let k = 0; k < (lavish ? 7 : 4); k++) later(R(300, 6500), () => firework(R(W() * 0.15, W() * 0.85), R(H() * 0.1, H() * 0.5)));
+  function stepSpark(s) {
+    s.vy += 0.05; s.vx *= 0.975; s.vy *= 0.975; s.x += s.vx; s.y += s.vy; s.life -= s.decay;
+    s.trail.push([s.x, s.y]); if (s.trail.length > 6) s.trail.shift();
+    return s.life > 0;
+  }
+  function drawSpark(s, fade) {
+    ctx.save(); ctx.globalAlpha = fade * Math.max(0, s.life);
+    ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    ctx.beginPath(); s.trail.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s.x, s.y, 1.5, 0, 6.283); ctx.fill();
+    ctx.restore();
+  }
+
+  // ---- animals ----
+  const animals = [], puffs = [];   // puffs: trails (sparkles / bubbles / dust)
+  const puff = (kind, x, y) => puffs.push({ kind, x, y, vx: R(-0.6, 0.6), vy: kind === 'bubble' ? R(-1.6, -0.6) : kind === 'dust' ? R(-0.5, 0.1) : R(-0.8, 0.4),
+                                            life: 1, size: kind === 'dust' ? R(4, 12) : R(12, 22), glyph: pick(['✨', '⭐', '💫', '🌟']) });
+  const offX = (dir, size, stagger) => dir > 0 ? -size - stagger : W() + size + stagger;     // start off-screen, staggered
+  const ACTS = {
+    fly() {         // crossing in waves, bobbing, sparkle trail
+      const star = pick(FX_ANIMALS.fliers), n = RI(8, 16);
+      for (let i = 0; i < n; i++) { const dir = Math.random() < 0.5 ? 1 : -1, size = R(40, 84);
+        animals.push({ kind: 'fly', glyph: Math.random() < 0.65 ? star : pick(FX_ANIMALS.fliers), dir, size, x: offX(dir, size, R(0, W() * 1.6)),
+                       y: R(H() * 0.08, H() * 0.75), vx: dir * R(3.2, 6.5), ph: R(0, 6.283), phV: R(0.04, 0.09), amp: R(10, 34), trail: 'sparkle' }); }
+    },
+    swim() {        // long sine waves across the lower half, bubbles
+      const n = RI(6, 12), dir = Math.random() < 0.5 ? 1 : -1;
+      for (let i = 0; i < n; i++) { const size = R(44, 90);
+        animals.push({ kind: 'swim', glyph: pick(FX_ANIMALS.swimmers), dir, size, x: offX(dir, size, i * R(120, 220)),
+                       y: R(H() * 0.45, H() * 0.85), vx: dir * R(2.2, 4.5), ph: R(0, 6.283), phV: R(0.03, 0.06), amp: R(30, 80), trail: 'bubble' }); }
+    },
+    parade() {      // a marching line along the bottom, hopping
+      const n = RI(8, 14), dir = Math.random() < 0.5 ? 1 : -1, size = R(48, 72), vx = dir * R(2.4, 3.6);
+      for (let i = 0; i < n; i++)
+        animals.push({ kind: 'walk', glyph: pick(FX_ANIMALS.walkers), dir, size, x: offX(dir, size, i * size * 1.25),
+                       y: H() - size * 0.55, vx, ph: R(0, 6.283), phV: 0.18, amp: size * 0.16 });
+    },
+    stampede() {    // fast herd, big, kicking up dust
+      const n = RI(10, 18), dir = Math.random() < 0.5 ? 1 : -1, herd = pick(FX_ANIMALS.walkers);
+      for (let i = 0; i < n; i++) { const size = R(52, 96);
+        animals.push({ kind: 'walk', glyph: Math.random() < 0.75 ? herd : pick(FX_ANIMALS.walkers), dir, size, x: offX(dir, size, R(0, W() * 1.2)),
+                       y: H() - size * 0.55 - R(0, 40), vx: dir * R(8, 13), ph: R(0, 6.283), phV: 0.35, amp: size * 0.12, trail: 'dust' }); }
+    },
+    bounce() {      // gravity + walls, like a screensaver
+      const n = RI(5, 9);
+      for (let i = 0; i < n; i++) { const size = R(44, 80);
+        animals.push({ kind: 'bounce', glyph: pick([...FX_ANIMALS.walkers, ...FX_ANIMALS.riders]), size, x: R(size, W() - size), y: R(-H(), -size),
+                       vx: R(-5, 5), vy: R(0, 3), rot: 0, vr: R(-0.08, 0.08) }); }
+    },
+    balloon() {     // riders hanging under balloons, rising and swaying
+      const n = RI(6, 11);
+      for (let i = 0; i < n; i++) { const size = R(40, 64);
+        animals.push({ kind: 'balloon', glyph: pick(FX_ANIMALS.riders), size, x: R(size, W() - size), y: H() + size * 2 + R(0, H() * 0.9),
+                       vy: -R(1.2, 2.4), ph: R(0, 6.283), phV: R(0.02, 0.05), amp: R(15, 40), color: color(), trail: 'sparkle' }); }
+    },
+  };
+  acts.forEach(a => ACTS[a]());
+  const facesRight = a => a.dir > 0;      // emoji face left by default → mirror when heading right
+
+  function stepAnimal(a) {
+    if (a.kind === 'fly' || a.kind === 'swim' || a.kind === 'walk') {
+      a.x += a.vx; a.ph += a.phV;
+      const on = a.x > -a.size * 2 && a.x < W() + a.size * 2;
+      if (on && a.trail && Math.random() < (a.kind === 'walk' ? 0.5 : 0.6))
+        puff(a.trail, a.x - a.dir * a.size * 0.45, a.y + (a.kind === 'walk' ? a.size * 0.45 : R(-a.size * 0.2, a.size * 0.3)));
+      return a.dir > 0 ? a.x < W() + a.size * 2 : a.x > -a.size * 2;
+    }
+    if (a.kind === 'bounce') {
+      a.vy += 0.25; a.x += a.vx; a.y += a.vy; a.rot += a.vr;
+      const floor = H() - a.size * 0.5;
+      if (a.y > floor) { a.y = floor; a.vy = -Math.abs(a.vy) * 0.82; a.vr = R(-0.1, 0.1); if (Math.abs(a.vy) < 1.5) a.vy = -R(9, 14); }
+      if (a.x < a.size * 0.5) { a.x = a.size * 0.5; a.vx = Math.abs(a.vx); }
+      if (a.x > W() - a.size * 0.5) { a.x = W() - a.size * 0.5; a.vx = -Math.abs(a.vx); }
+      return true;
+    }
+    if (a.kind === 'balloon') {
+      a.y += a.vy; a.ph += a.phV;
+      if (Math.random() < 0.08) puff('sparkle', a.x + Math.sin(a.ph) * a.amp + R(-20, 20), a.y + R(-10, 30));
+      return a.y > -a.size * 3;
+    }
+    return false;
+  }
+  function drawAnimal(a) {
+    ctx.save();
+    if (a.kind === 'fly') {
+      ctx.translate(a.x, a.y + Math.sin(a.ph) * a.amp); if (facesRight(a)) ctx.scale(-1, 1); ctx.rotate(Math.cos(a.ph) * 0.12);
+    } else if (a.kind === 'swim') {
+      ctx.translate(a.x, a.y + Math.sin(a.ph) * a.amp); if (facesRight(a)) ctx.scale(-1, 1); ctx.rotate(-Math.cos(a.ph) * 0.35 * a.dir);
+    } else if (a.kind === 'walk') {
+      ctx.translate(a.x, a.y - Math.abs(Math.sin(a.ph)) * a.amp); if (facesRight(a)) ctx.scale(-1, 1); ctx.rotate(Math.sin(a.ph) * 0.08);
+    } else if (a.kind === 'bounce') {
+      ctx.translate(a.x, a.y); ctx.rotate(a.rot);
+    } else if (a.kind === 'balloon') {
+      const x = a.x + Math.sin(a.ph) * a.amp, tilt = Math.cos(a.ph) * 0.18;
+      ctx.translate(x, a.y); ctx.rotate(tilt);
+      const r = a.size * 0.5, by = -a.size * 1.35;                        // balloon above the rider
+      ctx.strokeStyle = 'rgba(60,50,100,0.5)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(0, -a.size * 0.5); ctx.lineTo(0, by + r * 1.1); ctx.stroke();
+      ctx.fillStyle = a.color; ctx.beginPath(); ctx.ellipse(0, by, r * 0.85, r * 1.05, 0, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, by + r * 1.05); ctx.lineTo(-r * 0.15, by + r * 1.25); ctx.lineTo(r * 0.15, by + r * 1.25); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.beginPath(); ctx.ellipse(-r * 0.3, by - r * 0.35, r * 0.2, r * 0.32, -0.5, 0, 6.283); ctx.fill();
+    }
+    glyph(a.glyph, a.size, 0, 0);
+    ctx.restore();
+  }
+  function stepPuff(p) { p.life -= p.kind === 'dust' ? 0.03 : 0.025; p.x += p.vx; p.y += p.vy; return p.life > 0; }
+  function drawPuff(p, fade) {
+    ctx.save(); ctx.globalAlpha = fade * p.life;
+    if (p.kind === 'bubble') { ctx.strokeStyle = 'rgba(120,200,255,0.9)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 0.35, 0, 6.283); ctx.stroke(); }
+    else if (p.kind === 'dust') { ctx.fillStyle = 'rgba(160,150,140,0.6)'; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (1.4 - p.life), 0, 6.283); ctx.fill(); }
+    else glyph(p.glyph, p.size, p.x, p.y);
+    ctx.restore();
+  }
+
+  // ---- main loop ----
   const frame = (now) => {
     if (!fx.active) return;
     if (cv.width !== innerWidth * dpr || cv.height !== innerHeight * dpr) resize();
     if (!t0) t0 = now;
     const t = now - t0, fade = t > DURATION - 1200 ? Math.max(0, (DURATION - t) / 1200) : 1;
+    for (let i = schedule.length - 1; i >= 0; i--) if (t >= schedule[i].at) { schedule[i].fn(); schedule.splice(i, 1); }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W(), H());
     ctx.globalAlpha = fade;
-    let alive = false;
-
-    for (const c of confetti) {
-      c.vy += c.g; c.vx *= c.drag; c.vy *= c.drag;
-      c.wob += c.wobV; c.x += c.vx + Math.sin(c.wob) * 0.8; c.y += c.vy; c.rot += c.vr;
-      if (c.y > H() + 30) continue;
-      alive = true;
-      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rot);
-      ctx.scale(1, Math.abs(Math.cos(c.wob)) * 0.8 + 0.2);      // flutter
-      ctx.fillStyle = c.color;
-      if (c.shape === 'circle') { ctx.beginPath(); ctx.arc(0, 0, c.w / 2, 0, Math.PI * 2); ctx.fill(); }
-      else if (c.shape === 'strip') ctx.fillRect(-c.w / 4, -c.h, c.w / 2, c.h * 2);
-      else ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h);
-      ctx.restore();
-    }
-
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    for (const u of unicorns) {
-      u.x += u.vx; u.bob += u.bobV;
-      const y = u.y + Math.sin(u.bob) * u.amp;
-      const onscreen = u.x > -u.size * 2 && u.x < W() + u.size * 2;
-      if (u.dir > 0 ? u.x < W() + u.size * 2 : u.x > -u.size * 2) alive = true;
-      if (onscreen && Math.random() < 0.6) addSparkle(u.x - u.dir * u.size * 0.45, y + R(-u.size * 0.2, u.size * 0.3));
-      if (!onscreen) continue;
-      ctx.save(); ctx.translate(u.x, y);
-      if (u.dir > 0) ctx.scale(-1, 1);                            // 🦄 faces left by default
-      ctx.rotate(Math.cos(u.bob) * 0.12);
-      ctx.font = `${u.size}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-      ctx.fillText('🦄', 0, 0);
-      ctx.restore();
-    }
-    for (let i = sparkles.length - 1; i >= 0; i--) {
-      const sp = sparkles[i]; sp.life -= 0.025; sp.x += sp.vx; sp.y += sp.vy;
-      if (sp.life <= 0) { sparkles.splice(i, 1); continue; }
-      ctx.save(); ctx.globalAlpha = fade * sp.life;
-      ctx.font = `${sp.size}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-      ctx.fillText(sp.glyph, sp.x, sp.y); ctx.restore();
-    }
-
-    if (t < DURATION && (alive || sparkles.length)) fx.raf = requestAnimationFrame(frame);
+    const keep = (arr, step, draw) => { let n = 0; for (let i = 0; i < arr.length; i++) { const o = arr[i]; if (step(o)) { arr[n++] = o; draw(o, fade); } } arr.length = n; return n; };
+    let alive = 0;
+    alive += keep(confetti, stepConfetti, drawConfetti);
+    alive += keep(puffs, stepPuff, drawPuff);
+    alive += keep(sparks, stepSpark, drawSpark);
+    alive += keep(animals, stepAnimal, drawAnimal);
+    if (t < DURATION && (alive || schedule.length)) fx.raf = requestAnimationFrame(frame);
     else stopCelebration();
   };
   fx.active = true;
@@ -936,16 +1096,18 @@ function celebrate() {
 
 function finish() {
   stopListening();        // exercise complete: release the mic and flip the button back to Start
-  celebrate();
+  const errors = Number(document.getElementById('errors').textContent);
+  const accuracy = Math.round(100 * notes.length / (notes.length + errors));
+  celebrate(accuracy);
   const total = (performance.now() - startTime) / 1000;
   const avg = latencies.length
     ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null;
   const msg = document.getElementById('doneMsg');
-  msg.textContent = `Done in ${total.toFixed(1)}s` + (avg ? ` — average voice→result latency ${avg} ms` : '') + ' 🎉';
+  const cheer = FX_CHEERS[Math.floor(Math.random() * FX_CHEERS.length)];
+  const party = ['🎉', '🎊', '🥳', '🏆', '🌟', '🎵'][Math.floor(Math.random() * 6)];
+  msg.textContent = `${cheer} Done in ${total.toFixed(1)}s` + (avg ? ` — average voice→result latency ${avg} ms` : '') + ' ' + party;
   msg.style.display = 'block';
 
-  const errors = Number(document.getElementById('errors').textContent);
-  const accuracy = Math.round(100 * notes.length / (notes.length + errors));
   try { playFinish(accuracy); } catch (e) { console.warn('finish sound failed:', e); }   // never block the score
   history.unshift({
     when: new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
