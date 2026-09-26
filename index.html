@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solfège Sight-Reading Trainer (voice-to-text)</title>
+<script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
+<style>
+  :root {
+    --bg: #faf7f2; --ink: #3a3550; --accent: #7c6cbf; --good: #4caf7d;
+    --bad: #e0687c; --card: #ffffff; --muted: #9a94ae;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink);
+    display: flex; flex-direction: column; align-items: center; min-height: 100vh;
+  }
+  header { text-align: center; margin: 28px 16px 8px; }
+  header h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: 0.5px; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+  .card {
+    background: var(--card); border-radius: 16px; padding: 20px 28px;
+    box-shadow: 0 4px 18px rgba(60,50,100,0.08); margin: 14px; max-width: 760px; width: calc(100% - 28px);
+  }
+  #staffWrap { overflow-x: auto; }
+  svg { display: block; margin: 0 auto; }
+  .note-head { fill: var(--ink); }
+  .note-stem, .ledger { stroke: var(--ink); stroke-width: 1.6; }
+  .staff-line { stroke: #b9b3cc; stroke-width: 1.2; }
+  .note.current .note-head { fill: var(--accent); }
+  .note.current .note-stem { stroke: var(--accent); }
+  .note.done .note-head { fill: var(--good); }
+  .note.done .note-stem { stroke: var(--good); }
+  .note.wrong .note-head { fill: var(--bad); }
+  .note.wrong .note-stem { stroke: var(--bad); }
+  .syll-label { font-size: 14px; fill: var(--good); text-anchor: middle; font-weight: 600; }
+  .cursor { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 3; rx: 8; }
+  #controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: center; }
+  .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 20px 32px; }
+  .settings-label { font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-bottom: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    padding: 7px 14px; border-radius: 999px; border: 1.5px solid #ddd8ec;
+    background: white; color: var(--ink); font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: background 120ms, border-color 120ms;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip small { color: var(--muted); font-weight: 500; margin-left: 4px; font-size: 11px; }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: white; }
+  .chip.active small { color: #e6e1ff; }
+  .range-row, .slider-row { display: flex; align-items: center; gap: 10px; }
+  .range-row .arrow { color: var(--muted); }
+  select.pill {
+    appearance: none; -webkit-appearance: none; font-size: 14px; font-weight: 600;
+    padding: 8px 30px 8px 16px; border-radius: 999px; border: 1.5px solid #ddd8ec;
+    background: white url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' fill='none' stroke='%239a94ae' stroke-width='1.6'/></svg>") no-repeat right 12px center;
+    color: var(--ink); cursor: pointer;
+  }
+  select.pill:hover { border-color: var(--accent); }
+  input[type=range] { flex: 1; accent-color: var(--accent); cursor: pointer; }
+  #leapName { font-weight: 700; color: var(--accent); font-size: 14px; min-width: 148px; text-align: right; }
+  button {
+    font-size: 15px; padding: 10px 22px; border: none; border-radius: 10px;
+    background: var(--accent); color: white; cursor: pointer; font-weight: 600;
+  }
+  button.secondary { background: #e8e4f5; color: var(--accent); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  select { font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid #d6d1e6; background: white; color: var(--ink); }
+  #readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; text-align: center; }
+  .stat .value { font-size: 26px; font-weight: 700; min-height: 32px; }
+  .stat .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  #heard { font-style: italic; color: var(--muted); text-align: center; min-height: 20px; margin-top: 10px; font-size: 14px; }
+  #meter { height: 6px; background: #eee9f7; border-radius: 3px; overflow: hidden; margin-top: 12px; }
+  #meterFill { height: 100%; width: 0%; background: var(--accent); transition: width 60ms linear; }
+  #banner { background: #fdecef; color: var(--bad); padding: 12px 16px; border-radius: 10px; display: none; font-size: 14px; }
+  #heardLog { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+  .hw { font-size: 13px; font-family: ui-monospace, "SF Mono", Menlo, monospace; padding: 4px 10px; border-left: 3px solid var(--muted); background: #f7f5fc; border-radius: 4px; color: var(--ink); }
+  .hw.ok { border-left-color: var(--good); background: #eef8f2; }
+  .hw.ko { border-left-color: var(--bad); background: #fdf0f2; }
+  .hw .dim { color: var(--muted); }
+  #historyList { list-style: none; margin: 0; padding: 0; }
+  #historyList li { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 9px 2px; border-bottom: 1px solid #f0edf8; font-size: 14px; }
+  #historyList li:last-child { border-bottom: none; }
+  #historyList .h-meta { color: var(--muted); flex: 1; }
+  #historyList .h-acc { font-weight: 700; min-width: 52px; text-align: right; }
+  #historyList .h-time { font-weight: 700; color: var(--accent); min-width: 62px; text-align: right; }
+  #historyList .empty { color: var(--muted); font-style: italic; border: none; }
+  #doneMsg { text-align: center; font-size: 18px; font-weight: 700; color: var(--good); display: none; }
+  .hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Solfège Sight-Reading Trainer</h1>
+  <p>Read the staff, <strong>say</strong> each note name aloud: do · ré · mi · fa · sol · la · si
+    <br><span style="font-size:12px">accords : nommer les notes <strong>de bas en haut</strong></span></p>
+</header>
+
+<div class="card" id="banner"></div>
+
+<div class="card" style="max-width:1100px">
+  <div id="staffWrap"></div>
+  <div id="doneMsg"></div>
+</div>
+
+<div class="card">
+  <div class="settings-grid">
+    <div>
+      <div class="settings-label">Clé</div>
+      <div class="chips" id="clefChips"></div>
+    </div>
+    <div>
+      <div class="settings-label">Tessiture</div>
+      <div class="range-row">
+        <select class="pill" id="lowSel"></select>
+        <span class="arrow">→</span>
+        <select class="pill" id="highSel"></select>
+      </div>
+    </div>
+    <div>
+      <div class="settings-label">Accords</div>
+      <div class="chips" id="chordChips"></div>
+    </div>
+    <div>
+      <div class="settings-label">Nombre de notes</div>
+      <div class="chips" id="countChips"></div>
+    </div>
+    <div>
+      <div class="settings-label">Intervalle maximum</div>
+      <div class="slider-row">
+        <input type="range" id="leapSlider" min="1" max="7" step="1">
+        <span id="leapName"></span>
+      </div>
+    </div>
+    <div>
+      <div class="settings-label">Nom des notes lues</div>
+      <div class="chips" id="labelChips"></div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div id="controls">
+    <button id="startBtn">▶ Start listening</button>
+    <button id="newBtn" class="secondary">↻ New exercise</button>
+  </div>
+  <div id="meter"><div id="meterFill"></div></div>
+  <div id="heard">heard: —</div>
+  <div class="hint" id="engineStatus">engine: —</div>
+</div>
+
+<div class="card">
+  <div id="readout">
+    <div class="stat"><div class="value" id="lastWord">—</div><div class="label">last word</div></div>
+    <div class="stat"><div class="value" id="latency">—</div><div class="label">onset → result</div></div>
+    <div class="stat"><div class="value" id="progress">0 / 0</div><div class="label">progress</div></div>
+    <div class="stat"><div class="value" id="errors">0</div><div class="label">misses</div></div>
+    <div class="stat"><div class="value" id="timer">0.0s</div><div class="label">time</div></div>
+  </div>
+  <div class="hint">Latency is measured from your voice onset (mic level) to the recognizer's result.
+    Primary engine: Vosk WASM, on-device, grammar-restricted to the 7 note names — it cannot
+    transcribe other French words. Falls back to the Web Speech API if Vosk can't load.</div>
+</div>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:baseline">
+    <div class="settings-label">Notes entendues (debug)</div>
+    <button id="clearHeardBtn" class="secondary" style="font-size:12px; padding:4px 12px">effacer</button>
+  </div>
+  <div id="heardLog"></div>
+</div>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:baseline">
+    <div class="settings-label">Historique</div>
+    <button id="clearHistBtn" class="secondary" style="font-size:12px; padding:4px 12px">effacer</button>
+  </div>
+  <ol id="historyList"></ol>
+</div>
+
+<script>
+'use strict';
+
+/* ---------------- French solfège vocabulary & fuzzy aliases ----------------
+   Internal keys are unaccented; DISPLAY holds the French spelling.
+   Aliases = French homophones/near-homophones the fr-FR recognizer produces. */
+const SYLLABLES = ['do', 're', 'mi', 'fa', 'sol', 'la', 'si'];
+const DISPLAY = { do: 'do', re: 'ré', mi: 'mi', fa: 'fa', sol: 'sol', la: 'la', si: 'si' };
+const ALIASES = {
+  do:  ['do', 'dos', 'dodo', 'dot', 'd\'eau', 'deau', 'eau', 'donc', 'don', 'deux', 'doux'],
+  re:  ['ré', 're', 'raie', 'rait', 'rer', 'rez', 'réré', 'réer', 'errer', 'ray'],
+  mi:  ['mi', 'mis', 'mie', 'mit', 'mimi', 'ami', 'my'],
+  fa:  ['fa', 'fat', 'fah', 'ffa', 'va', 'vas', 'valve'],
+  sol: ['sol', 'sole', 'saule', 'seul', 'seule', 'sale', 'salle', 'saul', 'soleil'],
+  la:  ['la', 'là', 'las', 'l\'a', 'l\'as', 'lala'],
+  si:  ['si', 'ci', 'scie', 'six', 's\'y', 'sis', 'ici', 'sissi']
+};
+const WORD_TO_SYLLABLE = {};
+for (const [syl, words] of Object.entries(ALIASES))
+  for (const w of words) WORD_TO_SYLLABLE[normalizeWord(w)] = syl;
+
+function normalizeWord(w) {
+  return w.toLowerCase().normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')   // strip accents (sì → si)
+    .replace(/[^a-z]/g, '');
+}
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++)
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+
+/* Lenient, layered classification:
+   1. exact alias table
+   2. phonetic rule: onset consonant + first vowel class — each syllable has a
+      near-unique onset (d/r/m/f/s/l), only s needs the vowel to split sol vs si
+   3. edit distance ≤ 1 against any alias
+   4. last resort: edit distance ≤ 2 against the *expected* syllable (the app
+      knows which note is next, so lean toward it like a teacher would) */
+function classify(word, targetSyl) {
+  const w = normalizeWord(word);
+  if (!w) return null;
+  if (WORD_TO_SYLLABLE[w]) return WORD_TO_SYLLABLE[w];
+
+  // French onsets are near-unique per syllable: d→do, r→ré, m→mi, f/v→fa,
+  // l→la; only s/c needs the vowel to split si (i/e/y) from sol (o/a/au/eu).
+  const m = w.match(/^([^aeiouy]*)([aeiouy])/);
+  if (m) {
+    const onset = m[1], vowel = m[2];
+    if (/^(d|t)/.test(onset)) return 'do';
+    if (/^r/.test(onset)) return 're';
+    if (/^m/.test(onset)) return 'mi';
+    if (/^(f|v|ph)/.test(onset)) return 'fa';
+    if (/^l/.test(onset)) return 'la';
+    if (/^(s|c|z)/.test(onset)) return /[iey]/.test(vowel) ? 'si' : 'sol';
+  }
+
+  let best = null, bestDist = Infinity;
+  for (const [syl, words] of Object.entries(ALIASES))
+    for (const a of words) {
+      const d = levenshtein(w, normalizeWord(a));
+      if (d < bestDist || (d === bestDist && syl === targetSyl)) { bestDist = d; best = syl; }
+    }
+  if (bestDist <= 1) return best;
+
+  if (targetSyl && levenshtein(w, targetSyl) <= 2) return targetSyl;
+  return null;
+}
+
+/* ---------------- Last-word filter (shared by both engines) ----------------
+   Only the LAST word of each (partial) result is considered. Partials repeat
+   and revise the last word, so: same word at same position → skip; revised
+   word at same position → reprocess only if the previous attempt didn't match. */
+function makeLastWordFilter(onWord) {
+  let last = null;
+  return {
+    feed(words) {
+      if (!words.length) return;
+      const index = words.length - 1, word = words[index];
+      if (last && last.index === index && (last.word === word || last.matched)) return;
+      const matched = onWord(word, performance.now());
+      last = { index, word, matched };
+    },
+    reset() { last = null; }
+  };
+}
+
+function tokenize(text) {
+  return text.toLowerCase().replace(/\[unk\]/g, ' ')
+    .replace(/[^a-zà-ÿ' ]/g, ' ').split(/\s+/).filter(Boolean);
+}
+
+/* ---------------- Engine 1: Vosk — offline, grammar-restricted ----------------
+   The recognizer's vocabulary is locked to the 7 note names: it CANNOT output
+   any other French word. Non-note speech comes back as [unk] and is dropped. */
+class VoskRecognizer {
+  constructor(model, onWord, onHeard) {
+    this.model = model;
+    this.onHeard = onHeard;
+    this.filter = makeLastWordFilter(onWord);
+  }
+  async start() {
+    await startOnsetMeter();                    // shares the mic + AudioContext
+    const grammar = JSON.stringify([...SYLLABLES.map(s => DISPLAY[s]), '[unk]']);
+    this.rec = new this.model.KaldiRecognizer(onset.ctx.sampleRate, grammar);
+    // Partials = the low-latency path, but they flicker while a word is still
+    // being decoded. Only act on a last-word that is IDENTICAL in two
+    // consecutive partials (~50-90 ms cost) — kills most misreads.
+    let pending = null;
+    this.rec.on('partialresult', (m) => {
+      const words = tokenize(m.result.partial || '');
+      this.onHeard(words.join(' '));
+      if (!words.length) { pending = null; return; }
+      const key = (words.length - 1) + ':' + words[words.length - 1];
+      if (pending === key) this.filter.feed(words);
+      else pending = key;
+    });
+    this.rec.on('result', (m) => {              // finals are authoritative: no stability gate
+      const words = tokenize(m.result.text || '');
+      if (words.length) { this.onHeard(words.join(' ')); this.filter.feed(words); }
+      this.filter.reset();                      // utterance boundary
+      pending = null;
+    });
+    this.proc = onset.ctx.createScriptProcessor(2048, 1, 1);
+    this.proc.onaudioprocess = (e) => { try { this.rec.acceptWaveform(e.inputBuffer); } catch (err) {} };
+    onset.src.connect(this.proc);
+    this.proc.connect(onset.ctx.destination);   // required for onaudioprocess to fire; outputs silence
+  }
+  stop() {
+    if (this.proc) { try { onset.src.disconnect(this.proc); this.proc.disconnect(); } catch (e) {} }
+    if (this.rec) { try { this.rec.remove(); } catch (e) {} }
+  }
+}
+
+/* ---------------- Engine 2: Web Speech API — fallback, open vocabulary */
+class WebSpeechRecognizer {
+  constructor(lang, onWord, onHeard) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) throw new Error('unsupported');
+    this.rec = new SR();
+    this.rec.lang = lang;
+    this.rec.continuous = true;
+    this.rec.interimResults = true;
+    this.rec.maxAlternatives = 1;
+    this.active = false;
+    this.filter = makeLastWordFilter(onWord);
+    this.rec.onresult = (ev) => {
+      const words = [];
+      for (let i = 0; i < ev.results.length; i++)
+        words.push(...tokenize(ev.results[i][0].transcript));
+      onHeard(words.join(' '));
+      this.filter.feed(words);
+    };
+    // Chrome ends sessions after silence; restart transparently.
+    this.rec.onend = () => {
+      this.filter.reset();
+      if (this.active) { try { this.rec.start(); } catch (e) {} }
+    };
+    this.rec.onerror = (ev) => {
+      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+        this.active = false;
+        showBanner('Microphone access was denied. Allow the mic and reload.');
+      }
+    };
+  }
+  start() { this.active = true; this.filter.reset(); this.rec.start(); }
+  stop()  { this.active = false; try { this.rec.stop(); } catch (e) {} }
+}
+
+/* ---------------- Voice-onset detector (for the latency meter) ---------------- */
+const onset = { ctx: null, src: null, analyser: null, buf: null, speaking: false, t: 0 };
+async function startOnsetMeter() {
+  if (onset.ctx) { await onset.ctx.resume(); return; }
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
+  });
+  onset.ctx = new AudioContext();
+  onset.src = onset.ctx.createMediaStreamSource(stream);
+  onset.analyser = onset.ctx.createAnalyser();
+  onset.analyser.fftSize = 512;
+  onset.buf = new Float32Array(onset.analyser.fftSize);
+  onset.src.connect(onset.analyser);
+  (function poll() {
+    requestAnimationFrame(poll);
+    onset.analyser.getFloatTimeDomainData(onset.buf);
+    let rms = 0;
+    for (let i = 0; i < onset.buf.length; i++) rms += onset.buf[i] * onset.buf[i];
+    rms = Math.sqrt(rms / onset.buf.length);
+    document.getElementById('meterFill').style.width = Math.min(100, rms * 600) + '%';
+    const THRESH = 0.02;
+    if (rms > THRESH && !onset.speaking) { onset.speaking = true; onset.t = performance.now(); }
+    else if (rms < THRESH * 0.6) onset.speaking = false;
+  })();
+}
+
+/* ---------------- Exercise settings ----------------
+   Pitch = absolute diatonic degree: deg = octave*7 + letter (letter 0 = do/C).
+   Middle C (do4) = 28. The clef sets which degree sits on the bottom staff
+   line and which range is offered; spoken names are the 7 base syllables. */
+const CLEFS = {
+  treble: { label: 'Clé de sol', glyph: '\u{1D11E}', size: 62, dy: 4,
+            bottomDeg: 30,                              // mi4 on the bottom line
+            min: 25, max: 42, defLow: 28, defHigh: 35 }, // sol3..do6, défaut do4–do5
+  bass:   { label: 'Clé de fa', glyph: '\u{1D122}', size: 52, dy: -3,
+            bottomDeg: 18,                              // sol2 on the bottom line
+            min: 14, max: 31, defLow: 21, defHigh: 28 }, // do2..fa4, défaut do3–do4
+  grand:  { label: 'Sol & Fa', glyph: '\u{1D11E}\u{1D122}', // grand staff: pitch picks the stave
+            min: 14, max: 42, defLow: 21, defHigh: 35 },   // do2..do6, défaut do3–do5
+};
+const LEAPS = ['', 'seconde (conjoint)', 'tierce', 'quarte', 'quinte', 'sixte', 'septième', 'octave'];
+const COUNTS = [5, 10, 15, 30, 45];
+
+const CHORD_SIZES = [[1, 'Non'], [2, '2 notes'], [3, '3 notes'], [4, '4 notes']];
+
+const settings = { clef: 'treble', low: 28, high: 35, count: 15, leap: 2, chord: 1, showLabels: true };
+const lowSel = document.getElementById('lowSel'), highSel = document.getElementById('highSel');
+
+function degName(d) { return DISPLAY[SYLLABLES[d % 7]] + Math.floor(d / 7); }
+
+function makeChips(container, items, current, onPick, refresh) {
+  for (const it of items) {
+    const btn = document.createElement('button');
+    btn.className = 'chip' + (it.value === current ? ' active' : '');
+    btn.innerHTML = it.html;
+    btn.addEventListener('click', () => {
+      container.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      onPick(it.value);
+      (refresh || newExercise)();
+    });
+    container.appendChild(btn);
+  }
+}
+
+function refillRange() {
+  const c = CLEFS[settings.clef];
+  lowSel.innerHTML = ''; highSel.innerHTML = '';
+  for (let d = c.min; d <= c.max; d++) {
+    lowSel.add(new Option(degName(d), d));
+    highSel.add(new Option(degName(d), d));
+  }
+  settings.low = c.defLow; settings.high = c.defHigh;
+  lowSel.value = c.defLow; highSel.value = c.defHigh;
+}
+
+function buildSettingsUI() {
+  makeChips(document.getElementById('clefChips'),
+    Object.entries(CLEFS).map(([k, v]) => ({ value: k, html: `${v.glyph} ${v.label}` })),
+    settings.clef, v => { settings.clef = v; refillRange(); });
+
+  makeChips(document.getElementById('labelChips'),
+    [{ value: true, html: 'Afficher' }, { value: false, html: 'Masquer' }],
+    settings.showLabels, v => { settings.showLabels = v; },
+    drawStaff);   // display-only: redraw without regenerating the exercise
+
+  makeChips(document.getElementById('chordChips'),
+    CHORD_SIZES.map(([v, label]) => ({ value: v, html: label })),
+    settings.chord, v => { settings.chord = v; });
+
+  makeChips(document.getElementById('countChips'),
+    COUNTS.map(n => ({ value: n, html: String(n) })),
+    settings.count, v => { settings.count = v; });
+
+  refillRange();
+  lowSel.addEventListener('change', () => {   // keep low < high (at least a fifth apart)
+    const c = CLEFS[settings.clef];
+    if (+lowSel.value >= +highSel.value) highSel.value = Math.min(c.max, +lowSel.value + 4);
+    settings.low = +lowSel.value; settings.high = +highSel.value;
+    newExercise();
+  });
+  highSel.addEventListener('change', () => {
+    const c = CLEFS[settings.clef];
+    if (+highSel.value <= +lowSel.value) lowSel.value = Math.max(c.min, +highSel.value - 4);
+    settings.low = +lowSel.value; settings.high = +highSel.value;
+    newExercise();
+  });
+
+  const slider = document.getElementById('leapSlider'), leapName = document.getElementById('leapName');
+  slider.value = settings.leap;
+  leapName.textContent = LEAPS[settings.leap];
+  slider.addEventListener('input', () => { leapName.textContent = LEAPS[+slider.value]; });
+  slider.addEventListener('change', () => { settings.leap = +slider.value; newExercise(); });
+}
+
+let notes = [], idx = 0, running = false, startTime = 0, latencies = [];
+let chordSize = 1;   // notes per column in the current exercise
+
+function newExercise() {
+  const lo = settings.low, hi = settings.high;
+  const count = settings.count, maxLeap = settings.leap;
+  const grand = settings.clef === 'grand';
+  // chords are stacked thirds; shrink the chord if the range (or, on the
+  // grand staff, a single stave's share of it) can't fit it
+  const maxSpan = grand ? Math.max(27 - lo, hi - 28) : hi - lo;
+  chordSize = Math.max(1, Math.min(settings.chord, Math.floor(maxSpan / 2) + 1));
+  const minSpan = 2 * (chordSize - 1);
+  // a chord must fit the range and, on the grand staff, sit on one stave (not straddle do4)
+  const fits = (r, span) => r >= lo && r + span <= hi && !(grand && r < 28 && r + span >= 28);
+
+  // varied voicings: each adjacent interval inside the chord is drawn from
+  // tierce/quarte (common) to quinte/sixte (rarer), then squeezed back toward
+  // stacked thirds only if the chord overflows the available range
+  const chordIntervals = () => {
+    const opts = [2, 2, 3, 3, 4, 5];
+    const iv = [];
+    for (let k = 0; k < chordSize - 1; k++) iv.push(opts[Math.floor(Math.random() * opts.length)]);
+    let span = iv.reduce((a, b) => a + b, 0);
+    while (span > maxSpan) { iv[iv.indexOf(Math.max(...iv))]--; span--; }
+    return iv;
+  };
+  const nearestFit = (r, span) => {
+    for (let d = 0; d <= hi - lo; d++) {
+      if (fits(r - d, span)) return r - d;
+      if (fits(r + d, span)) return r + d;
+    }
+    return lo;
+  };
+
+  // start on the "do" closest to mid-range, if one fits
+  const mid = (lo + hi - minSpan) / 2;
+  const tonics = [];
+  for (let d = lo; d <= hi - minSpan; d++) if (d % 7 === 0 && fits(d, minSpan)) tonics.push(d);
+  let deg = tonics.length
+    ? tonics.reduce((a, b) => Math.abs(b - mid) < Math.abs(a - mid) ? b : a)
+    : Math.round(mid);
+
+  notes = [];
+  const pushChord = (root, iv) => {   // flat list stays in reading order: bottom → top
+    let d = root;
+    notes.push({ deg: d, syllable: SYLLABLES[d % 7], done: false });
+    for (const step of iv) {
+      d += step;
+      notes.push({ deg: d, syllable: SYLLABLES[d % 7], done: false });
+    }
+  };
+  let iv = chordIntervals();
+  deg = nearestFit(deg, iv.reduce((a, b) => a + b, 0));
+  pushChord(deg, iv);
+  for (let i = 1; i < count; i++) {
+    iv = chordIntervals();
+    const span = iv.reduce((a, b) => a + b, 0);
+    // chords can't random-walk across the do4 gap of the grand staff — hop staves sometimes
+    const hop = deg >= 28 ? 27 - span : 28;
+    if (grand && chordSize > 1 && fits(hop, span) && Math.random() < 0.25) {
+      deg = hop;
+    } else {
+      // weighted random walk on the root: smaller intervals more likely
+      const moves = [];
+      for (let m = -maxLeap; m <= maxLeap; m++) {
+        if (m === 0 || !fits(deg + m, span)) continue;
+        for (let w = 0; w <= maxLeap - Math.abs(m); w++) moves.push(m);
+      }
+      deg = moves.length ? deg + moves[Math.floor(Math.random() * moves.length)] : nearestFit(deg, span);
+    }
+    pushChord(deg, iv);
+  }
+
+  idx = 0; latencies = []; startTime = 0;
+  document.getElementById('errors').textContent = '0';
+  document.getElementById('timer').textContent = '0.0s';
+  document.getElementById('doneMsg').style.display = 'none';
+  drawStaff();
+  updateProgress();
+}
+
+const NOTES_PER_LINE = 15;
+
+function drawStaff() {
+  const spacing = 12, half = spacing / 2, gap = 58;
+  const grand = settings.clef === 'grand';
+  const staves = grand ? [CLEFS.treble, CLEFS.bass] : [CLEFS[settings.clef]];
+  const staffOf = deg => (grand && deg < 28) ? 1 : 0;   // index into staves; do4+ → sol
+  const noteStart = 92;
+  const cols = notes.length / chordSize;
+  const width = noteStart + gap * Math.min(cols, NOTES_PER_LINE) + 16;
+
+  let body = '', yOffset = 0;
+  for (let colStart = 0; colStart < cols; colStart += NOTES_PER_LINE) {
+    const lineCols = Math.min(NOTES_PER_LINE, cols - colStart);
+    const lineNotes = notes.slice(colStart * chordSize, (colStart + lineCols) * chordSize);
+
+    // vertical layout: each stave of the system sized by its own notes
+    const infos = staves.map((clef, si) => {
+      const ps = lineNotes.filter(n => staffOf(n.deg) === si).map(n => n.deg - clef.bottomDeg);
+      const pMax = Math.max(10, ...ps), pMin = Math.min(-2, ...ps);
+      const topLineY = yOffset + Math.max(40, pMax * half - 2);
+      const yFor = p => topLineY + 4 * spacing - p * half;  // p 0 = bottom line, 8 = top line
+      yOffset = yFor(pMin) + 10;      // next stave starts below this one's lowest extent
+      return { clef, topLineY, yFor };
+    });
+    const labelY = yOffset + 16;
+
+    for (const inf of infos) {
+      for (let l = 0; l < 5; l++)
+        body += `<line class="staff-line" x1="16" y1="${inf.topLineY + l * spacing}" x2="${width - 16}" y2="${inf.topLineY + l * spacing}"/>`;
+      body += `<text x="22" y="${inf.topLineY + 4 * spacing + inf.clef.dy}" font-size="${inf.clef.size}" fill="#3a3550">${inf.clef.glyph}</text>`;
+    }
+    if (grand)   // connector joining the two staves of the system
+      body += `<line x1="16" y1="${infos[0].topLineY}" x2="16" y2="${infos[1].topLineY + 4 * spacing}" stroke="#3a3550" stroke-width="2.5"/>`;
+
+    for (let c = 0; c < lineCols; c++) {
+      const col = colStart + c, first = col * chordSize;
+      const chord = notes.slice(first, first + chordSize);   // bottom → top
+      const x = noteStart + gap * c;
+      const hasCurrent = running && idx >= first && idx < first + chordSize;
+
+      // group the chord's notes per stave (contiguous, chord is sorted)
+      const groups = [[], []];
+      chord.forEach((n, pos) => groups[staffOf(n.deg)].push({ n, i: first + pos }));
+
+      for (let si = 0; si < staves.length; si++) {
+        const g = groups[si];
+        if (!g.length) continue;
+        const inf = infos[si];
+        const pB = g[0].n.deg - inf.clef.bottomDeg, pT = g[g.length - 1].n.deg - inf.clef.bottomDeg;
+
+        // one stem per stave-group, colored like the group's state
+        const stemCls = 'note' + (g.every(e => e.n.done) ? ' done' : hasCurrent ? ' current' : '');
+        if ((pB + pT) / 2 >= 4)
+          body += `<g class="${stemCls}"><line class="note-stem" x1="${x - 6.5}" y1="${inf.yFor(pT) + 2}" x2="${x - 6.5}" y2="${inf.yFor(pB) + 36}"/></g>`;
+        else
+          body += `<g class="${stemCls}"><line class="note-stem" x1="${x + 6.5}" y1="${inf.yFor(pB) - 2}" x2="${x + 6.5}" y2="${inf.yFor(pT) - 36}"/></g>`;
+
+        for (const { n, i } of g) {
+          const p = n.deg - inf.clef.bottomDeg, y = inf.yFor(p);
+          const cls = 'note' + (i === idx && running ? ' current' : '') + (n.done ? ' done' : '');
+          body += `<g class="${cls}" id="note-${i}">`;
+          for (let L = -2; L >= p; L -= 2)   // ledger lines below the stave
+            body += `<line class="ledger" x1="${x - 11}" y1="${inf.yFor(L)}" x2="${x + 11}" y2="${inf.yFor(L)}"/>`;
+          for (let L = 10; L <= p; L += 2)   // ledger lines above the stave
+            body += `<line class="ledger" x1="${x - 11}" y1="${inf.yFor(L)}" x2="${x + 11}" y2="${inf.yFor(L)}"/>`;
+          body += `<ellipse class="note-head" cx="${x}" cy="${y}" rx="7.5" ry="5.5" transform="rotate(-18 ${x} ${y})"/>`;
+          body += `</g>`;
+        }
+      }
+
+      // validated syllables so far, in reading order (bottom → top)
+      const doneSyls = settings.showLabels ? chord.filter(n => n.done).map(n => DISPLAY[n.syllable]) : [];
+      if (doneSyls.length)
+        body += `<text class="syll-label" x="${x}" y="${labelY}" style="font-size:${chordSize > 1 ? 11 : 14}px">${doneSyls.join('·')}</text>`;
+      if (hasCurrent) {
+        const noteYs = chord.map(n => infos[staffOf(n.deg)].yFor(n.deg - infos[staffOf(n.deg)].clef.bottomDeg));
+        const y1 = Math.min(infos[0].topLineY - 14, Math.min(...noteYs) - 40);
+        const y2 = Math.max(infos[infos.length - 1].topLineY + 4 * spacing + 14, Math.max(...noteYs) + 40);
+        body += `<rect class="cursor" x="${x - 18}" y="${y1}" width="36" height="${y2 - y1}" rx="8"/>`;
+      }
+    }
+    yOffset = labelY + 12;   // spacing before the next system
+  }
+
+  document.getElementById('staffWrap').innerHTML =
+    `<svg width="100%" viewBox="0 0 ${width} ${yOffset}" style="display:block">${body}</svg>`;
+}
+
+function updateProgress() {
+  document.getElementById('progress').textContent = `${idx} / ${notes.length}`;
+}
+
+/* ---------------- Audio feedback (synthesized, no assets) ---------------- */
+function audioCtx() {
+  if (!audioCtx.ctx) audioCtx.ctx = onset.ctx || new AudioContext();
+  return audioCtx.ctx;
+}
+
+// One brass-ish note: sawtooth through a lowpass, quick attack, optional
+// pitch slide (f0→f1) and vibrato — enough for both fanfare and trombone.
+function tone(f0, f1, t0, dur, opts = {}) {
+  const { type = 'sawtooth', vol = 0.14, vibrato = 0 } = opts;
+  const ctx = audioCtx();
+  const osc = ctx.createOscillator(), gain = ctx.createGain(), filt = ctx.createBiquadFilter();
+  osc.type = type;
+  osc.frequency.setValueAtTime(f0, t0);
+  if (f1 !== f0) osc.frequency.linearRampToValueAtTime(f1, t0 + dur);
+  if (vibrato) {
+    const lfo = ctx.createOscillator(), lg = ctx.createGain();
+    lfo.frequency.value = vibrato; lg.gain.value = f0 * 0.04;
+    lfo.connect(lg); lg.connect(osc.frequency);
+    lfo.start(t0); lfo.stop(t0 + dur + 0.05);
+  }
+  filt.type = 'lowpass'; filt.frequency.value = 2400; filt.Q.value = 1;
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.linearRampToValueAtTime(vol, t0 + 0.025);
+  gain.gain.setValueAtTime(vol, t0 + dur * 0.7);
+  gain.gain.linearRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(filt); filt.connect(gain); gain.connect(ctx.destination);
+  osc.start(t0); osc.stop(t0 + dur + 0.05);
+}
+
+function playWrong() {
+  const t = audioCtx().currentTime;
+  tone(196, 158, t, 0.15, { type: 'square', vol: 0.05 });
+}
+
+function playFinish(accuracy) {
+  const t = audioCtx().currentTime + 0.06;
+  const N = s => 261.63 * Math.pow(2, s / 12);   // semitones above do4
+  let tt = t;
+  if (accuracy >= 90) {          // fanfare triomphale
+    for (const [s, d] of [[0, .14], [4, .14], [7, .14]]) { tone(N(s), N(s), tt, d); tt += d * .95; }
+    for (const s of [12, 16, 19]) tone(N(s), N(s), tt, .55, { vol: 0.09 });   // accord final
+  } else if (accuracy >= 70) {   // honnête, sans gloire
+    for (const [s, d] of [[0, .16], [4, .16], [7, .38]]) { tone(N(s), N(s), tt, d, { vol: 0.11 }); tt += d * .95; }
+  } else {                       // trombone triste
+    for (const s of [10, 9, 8]) { tone(N(s), N(s - 0.7), tt, .32); tt += .34; }
+    tone(N(7), N(3), tt, 1.0, { vibrato: 6 });
+  }
+}
+
+/* ---------------- Heard-word debug log ---------------- */
+function logHeard(word, syl, target, matched, ms) {
+  const log = document.getElementById('heardLog');
+  const row = document.createElement('div');
+  row.className = 'hw' + (target && syl ? (matched ? ' ok' : ' ko') : '');
+  const time = new Date().toLocaleTimeString('fr-FR');
+  row.innerHTML =
+    `<span class="dim">${time}</span> «${word}» → <strong>${syl ? DISPLAY[syl] : 'ignoré'}</strong>` +
+    (target ? ` <span class="dim">· attendu</span> ${DISPLAY[target.syllable]}` : '') +
+    (ms ? ` <span class="dim">· ${ms} ms</span>` : '');
+  log.prepend(row);
+  while (log.children.length > 300) log.lastChild.remove();
+}
+document.getElementById('clearHeardBtn').addEventListener('click', () => {
+  document.getElementById('heardLog').innerHTML = '';
+});
+
+/* ---------------- Matching ---------------- */
+function handleWord(word, tRecognized) {
+  const target = (running && idx < notes.length) ? notes[idx] : null;
+  const syl = classify(word, target && target.syllable);
+  document.getElementById('lastWord').textContent = syl ? `${word} → ${DISPLAY[syl]}` : word;
+  let ms = null;
+  if (onset.t) {
+    ms = Math.round(tRecognized - onset.t);
+    if (ms > 0 && ms < 3000) {
+      latencies.push(ms);
+      document.getElementById('latency').textContent = ms + ' ms';
+    } else ms = null;
+  }
+  logHeard(word, syl, target, target && syl === target.syllable, ms);
+  if (!syl || !target) return false;
+  if (!startTime) startTime = performance.now();
+
+  if (syl === target.syllable) {
+    target.done = true;
+    idx++;
+    updateProgress();
+    document.getElementById('timer').textContent = ((performance.now() - startTime) / 1000).toFixed(1) + 's';
+    drawStaff();
+    if (idx >= notes.length) finish();
+    return true;
+  }
+  playWrong();
+  const errEl = document.getElementById('errors');
+  errEl.textContent = String(Number(errEl.textContent) + 1);
+  const g = document.getElementById(`note-${idx}`);
+  if (g) {
+    g.classList.add('wrong');
+    setTimeout(() => g.classList.remove('wrong'), 350);
+  }
+  return false;
+}
+
+function finish() {
+  const total = (performance.now() - startTime) / 1000;
+  const avg = latencies.length
+    ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null;
+  const msg = document.getElementById('doneMsg');
+  msg.textContent = `Done in ${total.toFixed(1)}s` + (avg ? ` — average voice→result latency ${avg} ms` : '') + ' 🎉';
+  msg.style.display = 'block';
+
+  const errors = Number(document.getElementById('errors').textContent);
+  const accuracy = Math.round(100 * notes.length / (notes.length + errors));
+  playFinish(accuracy);
+  history.unshift({
+    when: new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
+    key: CLEFS[settings.clef].label,
+    count: chordSize > 1 ? `${notes.length / chordSize} accords ×${chordSize}` : `${notes.length} notes`,
+    range: `${degName(settings.low)}–${degName(settings.high)}`,
+    accuracy,
+    seconds: +total.toFixed(1),
+  });
+  history = history.slice(0, 30);
+  localStorage.setItem('solfege-history', JSON.stringify(history));
+  renderHistory();
+}
+
+/* ---------------- Score history ---------------- */
+let history = [];
+try { history = JSON.parse(localStorage.getItem('solfege-history')) || []; } catch (e) {}
+
+function renderHistory() {
+  const ol = document.getElementById('historyList');
+  if (!history.length) {
+    ol.innerHTML = '<li class="empty">Aucun exercice terminé pour l\'instant.</li>';
+    return;
+  }
+  ol.innerHTML = history.map(h => `
+    <li>
+      <span class="h-meta">${h.when} · ${h.key} · ${h.count} · ${h.range}</span>
+      <span class="h-acc" style="color:${h.accuracy >= 90 ? 'var(--good)' : h.accuracy >= 70 ? 'var(--ink)' : 'var(--bad)'}">${h.accuracy}%</span>
+      <span class="h-time">${h.seconds}s</span>
+    </li>`).join('');
+}
+
+document.getElementById('clearHistBtn').addEventListener('click', () => {
+  history = [];
+  localStorage.removeItem('solfege-history');
+  renderHistory();
+});
+
+/* ---------------- Wiring ---------------- */
+let recognizer = null;
+const startBtn = document.getElementById('startBtn');
+
+function showBanner(text) {
+  const b = document.getElementById('banner');
+  b.textContent = text;
+  b.style.display = 'block';
+}
+
+let voskModel = null;
+const engineEl = document.getElementById('engineStatus');
+const onHeard = (t) => { document.getElementById('heard').textContent = 'heard: ' + (t || '—'); };
+
+startBtn.addEventListener('click', async () => {
+  if (running) {
+    running = false;
+    recognizer.stop();
+    startBtn.textContent = '▶ Start listening';
+    drawStaff();
+    return;
+  }
+  startBtn.disabled = true;
+  try {
+    if (typeof Vosk === 'undefined') throw new Error('vosk-browser script not loaded');
+    if (!voskModel) {
+      engineEl.textContent = 'engine: loading French model (46 MB — first load only, ~10s)…';
+      voskModel = await Vosk.createModel('model/vosk-model-small-fr-0.22.tar.gz');
+    }
+    recognizer = new VoskRecognizer(voskModel, handleWord, onHeard);
+    await recognizer.start();
+    engineEl.textContent = 'engine: Vosk offline — vocabulary locked to do · ré · mi · fa · sol · la · si';
+  } catch (e) {
+    console.warn('Vosk unavailable, falling back to Web Speech API:', e);
+    try {
+      await startOnsetMeter();
+      recognizer = new WebSpeechRecognizer('fr-FR', handleWord, onHeard);
+      recognizer.start();
+      engineEl.textContent = 'engine: Web Speech fallback — open vocabulary, expect mishearings';
+    } catch (e2) {
+      showBanner('No speech engine available. Serve the folder over http://localhost (python3 -m http.server) and use Chrome, Edge, or Safari.');
+      startBtn.disabled = false;
+      return;
+    }
+  }
+  startBtn.disabled = false;
+  running = true;
+  startBtn.textContent = '⏸ Stop';
+  drawStaff();
+});
+
+document.getElementById('newBtn').addEventListener('click', newExercise);
+
+buildSettingsUI();
+renderHistory();
+newExercise();
+</script>
+</body>
+</html>
