@@ -82,13 +82,26 @@
   .hw.ok { border-left-color: var(--good); background: #eef8f2; }
   .hw.ko { border-left-color: var(--bad); background: #fdf0f2; }
   .hw .dim { color: var(--muted); }
-  #historyList { list-style: none; margin: 0; padding: 0; }
-  #historyList li { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 9px 2px; border-bottom: 1px solid #f0edf8; font-size: 14px; }
-  #historyList li:last-child { border-bottom: none; }
-  #historyList .h-meta { color: var(--muted); flex: 1; }
-  #historyList .h-acc { font-weight: 700; min-width: 52px; text-align: right; }
-  #historyList .h-time { font-weight: 700; color: var(--accent); min-width: 62px; text-align: right; }
-  #historyList .empty { color: var(--muted); font-style: italic; border: none; }
+  /* full-page history view */
+  #historyPage { position: fixed; inset: 0; z-index: 40; background: var(--bg); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .hp-inner { max-width: 900px; margin: 0 auto; padding: 20px 16px 40px; }
+  .hp-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .hp-head h2 { font-size: 20px; margin: 0; }
+  .hp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .hp-stats .stat { background: var(--card); border-radius: 12px; padding: 12px 8px; text-align: center; box-shadow: 0 4px 18px rgba(60,50,100,0.08); }
+  .hp-stats .value { font-size: 22px; }
+  .hp-tablewrap { background: var(--card); border-radius: 16px; box-shadow: 0 4px 18px rgba(60,50,100,0.08); overflow-x: auto; }
+  #histTable { width: 100%; border-collapse: collapse; font-size: 14px; }
+  #histTable th, #histTable td { padding: 10px 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid #f0edf8; }
+  #histTable th { font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  #histTable tbody tr:last-child td { border-bottom: none; }
+  #histTable .num { text-align: right; }
+  #histTable .score { font-weight: 700; }
+  #histTable .dur { font-weight: 700; color: var(--accent); }
+  #histTable .muted { color: var(--muted); }
+  #histTable .empty { text-align: center; color: var(--muted); font-style: italic; padding: 28px; }
+  .hp-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+  .hp-foot .hint { margin: 0; text-align: left; }
   #doneMsg { text-align: center; font-size: 18px; font-weight: 700; color: var(--good); display: none; }
   .hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; }
   #fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; display: none; }
@@ -104,6 +117,26 @@
 
 <canvas id="fx" aria-hidden="true"></canvas>
 
+<div id="historyPage" hidden role="dialog" aria-labelledby="historyTitle">
+  <div class="hp-inner">
+    <div class="hp-head">
+      <h2 id="historyTitle">📜 Historique des exercices</h2>
+      <button id="histCloseBtn" class="secondary">✕ Fermer</button>
+    </div>
+    <div id="histStats" class="hp-stats"></div>
+    <div class="hp-tablewrap">
+      <table id="histTable">
+        <thead><tr><th>Date</th><th>Heure</th><th>Exercice</th><th>Détail</th><th class="num">Score</th><th class="num">Erreurs</th><th class="num">Durée</th></tr></thead>
+        <tbody id="histBody"></tbody>
+      </table>
+    </div>
+    <div class="hp-foot">
+      <span class="hint" id="histNote">Enregistré localement dans ce navigateur (localStorage).</span>
+      <button id="clearHistBtn" class="secondary">🗑 Effacer l'historique</button>
+    </div>
+  </div>
+</div>
+
 <div class="card" id="banner"></div>
 
 <div class="card" id="topCard">
@@ -115,6 +148,7 @@
     <button id="startBtn">▶ Start listening</button>
     <button id="newBtn" class="secondary">↻ Restart</button>
     <button id="customBtn" class="secondary" aria-expanded="false">⚙ Personnaliser</button>
+    <button id="histBtn" class="secondary">📜 Historique</button>
   </div>
   <div id="meter"><div id="meterFill"></div></div>
   <div id="heard">heard: —</div>
@@ -181,14 +215,6 @@
     <button id="clearHeardBtn" class="secondary" style="font-size:12px; padding:4px 12px">effacer</button>
   </div>
   <div id="heardLog"></div>
-</div>
-
-<div class="card">
-  <div style="display:flex; justify-content:space-between; align-items:baseline">
-    <div class="settings-label">Historique</div>
-    <button id="clearHistBtn" class="secondary" style="font-size:12px; padding:4px 12px">effacer</button>
-  </div>
-  <ol id="historyList"></ol>
 </div>
 
 <script>
@@ -1109,38 +1135,78 @@ function finish() {
   msg.style.display = 'block';
 
   try { playFinish(accuracy); } catch (e) { console.warn('finish sound failed:', e); }   // never block the score
+  const preset = presetMatching();
   history.unshift({
-    when: new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
+    ts: new Date().toISOString(),                       // full timestamp; displayed as date + hh:mm
+    exercise: preset ? preset.label : 'Personnalisé',
     key: CLEFS[settings.clef].label,
     count: chordSize > 1 ? `${notes.length / chordSize} accords ×${chordSize}` : `${notes.length} notes`,
     range: `${degName(settings.low)}–${degName(settings.high)}`,
     accuracy,
+    misses: errors,
     seconds: +total.toFixed(1),
   });
-  history = history.slice(0, 30);
-  localStorage.setItem('solfege-history', JSON.stringify(history));
+  history = history.slice(0, 5000);                     // effectively unlimited, bounded for storage sanity
+  saveHistory();
   renderHistory();
 }
 
-/* ---------------- Score history ---------------- */
+/* ---------------- Score history (localStorage) ----------------
+   One entry per finished run: ts (ISO), exercise, clef, count, range, accuracy, misses, seconds.
+   Older entries (before ts existed) carry a preformatted `when` string. */
 let history = [];
 try { history = JSON.parse(localStorage.getItem('solfege-history')) || []; } catch (e) {}
+function saveHistory() {
+  try { localStorage.setItem('solfege-history', JSON.stringify(history)); }
+  catch (e) { console.warn('could not save history:', e); }
+}
+const fmtDate = ts => new Date(ts).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const fmtTime = ts => new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+const scoreColor = a => a >= 90 ? 'var(--good)' : a >= 70 ? 'var(--ink)' : 'var(--bad)';
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function renderHistory() {
-  const ol = document.getElementById('historyList');
+  document.getElementById('histBtn').textContent = '📜 Historique' + (history.length ? ` (${history.length})` : '');
+  const body = document.getElementById('histBody'), stats = document.getElementById('histStats');
   if (!history.length) {
-    ol.innerHTML = '<li class="empty">Aucun exercice terminé pour l\'instant.</li>';
+    stats.innerHTML = '';
+    body.innerHTML = '<tr><td colspan="7" class="empty">Aucun exercice terminé pour l\'instant.</td></tr>';
     return;
   }
-  ol.innerHTML = history.map(h => `
-    <li>
-      <span class="h-meta">${h.when} · ${h.key} · ${h.count} · ${h.range}</span>
-      <span class="h-acc" style="color:${h.accuracy >= 90 ? 'var(--good)' : h.accuracy >= 70 ? 'var(--ink)' : 'var(--bad)'}">${h.accuracy}%</span>
-      <span class="h-time">${h.seconds}s</span>
-    </li>`).join('');
+  const accs = history.map(h => h.accuracy);
+  const best = Math.max(...accs), avg = Math.round(accs.reduce((a, b) => a + b, 0) / accs.length);
+  const weekAgo = Date.now() - 7 * 86400e3;
+  const thisWeek = history.filter(h => h.ts && new Date(h.ts).getTime() > weekAgo).length;
+  const perfect = history.filter(h => h.accuracy === 100).length;
+  stats.innerHTML = [
+    [history.length, 'exercices'], [thisWeek, '7 derniers jours'], [best + '%', 'meilleur score'],
+    [avg + '%', 'score moyen'], [perfect, 'sans faute'],
+  ].map(([v, l]) => `<div class="stat"><div class="value">${v}</div><div class="label">${l}</div></div>`).join('');
+  body.innerHTML = history.map(h => {
+    const date = h.ts ? fmtDate(h.ts) : esc(h.when || '').split(' ')[0];
+    const time = h.ts ? fmtTime(h.ts) : esc(h.when || '').split(' ').slice(1).join(' ');
+    return `<tr>
+      <td>${date}</td><td class="muted">${time}</td>
+      <td>${esc(h.exercise || h.key)}</td>
+      <td class="muted">${esc(h.key)} · ${esc(h.count)} · ${esc(h.range)}</td>
+      <td class="num score" style="color:${scoreColor(h.accuracy)}">${h.accuracy}%</td>
+      <td class="num muted">${h.misses != null ? h.misses : '—'}</td>
+      <td class="num dur">${h.seconds}s</td>
+    </tr>`;
+  }).join('');
 }
 
+const historyPage = document.getElementById('historyPage');
+function showHistory(on) {
+  if (on) renderHistory();
+  historyPage.hidden = !on;
+  document.body.style.overflow = on ? 'hidden' : '';     // the page scrolls instead of the app behind it
+}
+document.getElementById('histBtn').addEventListener('click', () => showHistory(true));
+document.getElementById('histCloseBtn').addEventListener('click', () => showHistory(false));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !historyPage.hidden) showHistory(false); });
 document.getElementById('clearHistBtn').addEventListener('click', () => {
+  if (!history.length || !confirm(`Effacer les ${history.length} exercices enregistrés ?`)) return;
   history = [];
   localStorage.removeItem('solfege-history');
   renderHistory();
